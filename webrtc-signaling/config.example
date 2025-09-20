@@ -1,0 +1,7 @@
+# WebRTC Signaling Server Configuration
+# Copy this file to .env and customize for your setup
+
+# Server bind configuration
+PORT=8080
+HOST=0.0.0.0
+

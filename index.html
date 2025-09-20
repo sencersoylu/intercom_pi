@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="tr">
+
+<head>
+    <meta charset="utf-8" />
+    <title>WebRTC Ses Köprüsü (Web ↔ RasPi)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto;
+            background: #0f172a;
+            color: #e5e7eb;
+        }
+
+        .wrap {
+            max-width: 880px;
+            margin: 24px auto;
+            padding: 0 16px;
+        }
+
+        .card {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 14px;
+            padding: 16px;
+        }
+
+        h1 {
+            margin: 0 0 12px;
+            font-size: 20px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .col {
+            flex: 1 1 260px;
+            min-width: 260px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #94a3b8;
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input[type=text] {
+            width: 100%;
+            background: #0b1220;
+            color: #e5e7eb;
+            border: 1px solid #1f2937;
+            border-radius: 10px;
+            padding: 10px 12px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #0ea5e9;
+            border: none;
+            color: white;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #0284c7;
+        }
+
+        button.ghost {
+            background: transparent;
+            border: 1px solid #1f2937;
+            color: #e5e7eb;
+        }
+
+        button.ghost:hover:not(:disabled) {
+            background: #1f2937;
+        }
+
+        button:disabled {
+            opacity: .6;
+            cursor: not-allowed;
+        }
+
+        .line {
+            height: 1px;
+            background: #1f2937;
+            margin: 14px 0;
+        }
+
+        .status {
+            font: 13px ui-monospace, Menlo, Consolas, monospace;
+            white-space: pre-wrap;
+            background: #0b1220;
+            border: 1px dashed #1f2937;
+            border-radius: 10px;
+            padding: 12px;
+            line-height: 1.35;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+        }
+
+        .ok {
+            background: #064e3b;
+            color: #a7f3d0;
+        }
+
+        .warn {
+            background: #3b2806;
+            color: #fde68a;
+        }
+
+        .err {
+            background: #3b0a06;
+            color: #fecaca;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 8px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .small {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .error-message {
+            background: #3b0a06;
+            color: #fecaca;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 12px 0;
+            border: 1px solid #ef4444;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>WebRTC Ses Köprüsü <span class="small">(Web ↔ Raspberry Pi)</span></h1>
+        <div class="card">
+            <div class="row">
+                <div class="col">
+                    <label>Sinyalleme URL (ws/wss)</label>
+                    <input id="sigUrl" type="text" placeholder="ws://192.168.1.12:8080/ws" />
+                </div>
+                <div class="col">
+                    <label>Benim ID</label>
+                    <input id="myId" type="text" value="web-1" />
+                </div>
+                <div class="col">
+                    <label>Uzak ID (Raspberry Pi)</label>
+                    <input id="peerId" type="text" value="raspi-1" />
+                </div>
+            </div>
+
+            <div class="line"></div>
+
+            <div class="grid">
+                <div>
+                    <button id="btnConnect">Bağlan</button>
+                    <button id="btnHangup" class="ghost" disabled>Kes</button>
+                </div>
+                <div>
+                    <label style="display:inline-flex; gap:6px; align-items:center;">
+                        <input id="muteMic" type="checkbox" />
+                        <span class="small">Mikrofonu sessize al</span>
+                    </label>
+                </div>
+                <div>
+                    <span id="pcState" class="pill warn">hazır</span>
+                </div>
+            </div>
+
+            <audio id="remoteAudio" controls autoplay playsinline></audio>
+
+            <div id="errorContainer"></div>
+
+            <div class="line"></div>
+            <div id="log" class="status"></div>
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            const $ = id => document.getElementById(id);
+            const logEl = $('log'), pcStateEl = $('pcState'), btnConnect = $('btnConnect'), btnHangup = $('btnHangup');
+            const muteMic = $('muteMic'), audioEl = $('remoteAudio'), sigUrl = $('sigUrl'), myId = $('myId'), peerId = $('peerId');
+            const errorContainer = $('errorContainer');
+
+            sigUrl.value ||= (location.protocol === 'https:' ? 'wss://YOUR_HOST/ws' : 'ws://192.168.1.12:8080/ws');
+
+            let ws = null, pc = null, localStream = null, remoteStream = null, connected = false;
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 5;
+
+            function log(...a) {
+                const timestamp = new Date().toLocaleTimeString();
+                const message = a.map(x => typeof x === 'string' ? x : JSON.stringify(x, null, 2)).join(' ');
+                logEl.textContent += `${timestamp}  ${message}\n`;
+                logEl.scrollTop = logEl.scrollHeight;
+                console.log(`[WebRTC] ${message}`);
+            }
+
+            function showError(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message';
+                errorDiv.textContent = message;
+                errorContainer.appendChild(errorDiv);
+
+                // Auto-remove error after 10 seconds
+                setTimeout(() => {
+                    if (errorDiv.parentNode) {
+                        errorDiv.parentNode.removeChild(errorDiv);
+                    }
+                }, 10000);
+            }
+
+            function clearErrors() {
+                errorContainer.innerHTML = '';
+            }
+
+            function setBadge(text, tone = 'warn') {
+                pcStateEl.textContent = text;
+                pcStateEl.className = 'pill ' + (tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : 'warn');
+            }
+
+            function sendSig(m) {
+                if (ws?.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send(JSON.stringify(m));
+                    } catch (error) {
+                        log('Mesaj gönderme hatası:', error.message);
+                    }
+                } else {
+                    log('WS kapalı, mesaj gidemedi:', m.type);
+                }
+            }
+
+            async function openWs() {
+                return new Promise((res, rej) => {
+                    try {
+                        const u = new URL(sigUrl.value.trim());
+                        u.searchParams.set('id', myId.value.trim());
+                        ws = new WebSocket(u);
+
+                        const timeout = setTimeout(() => {
+                            rej(new Error('WebSocket bağlantı zaman aşımı'));
+                        }, 10000);
+
+                        ws.onopen = () => {
+                            clearTimeout(timeout);
+                            log('WS bağlı:', u.toString());
+                            reconnectAttempts = 0;
+                            res();
+                        };
+
+                        ws.onerror = e => {
+                            clearTimeout(timeout);
+                            log('WS hata:', e?.message || 'Bilinmeyen hata');
+                            rej(e);
+                        };
+
+                        ws.onclose = (event) => {
+                            clearTimeout(timeout);
+                            log(`WS kapandı (kod: ${event.code}, sebep: ${event.reason})`);
+                            if (connected && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                                reconnectAttempts++;
+                                log(`Yeniden bağlanma denemesi ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+                                setTimeout(() => tryReconnect(), 2000 * reconnectAttempts);
+                            } else if (!connected) {
+                                cleanup(false);
+                            }
+                        };
+
+                        ws.onmessage = async ev => {
+                            try {
+                                const msg = JSON.parse(ev.data);
+                                if (msg.type === 'system') {
+                                    log('SYS:', msg.event, 'id:', msg.id ?? '');
+                                    if (msg.event === 'peer_unavailable') {
+                                        showError(`Hedef peer (${msg.to}) bulunamadı`);
+                                    }
+                                    return;
+                                }
+                                if (!pc) return;
+
+                                if (msg.type === 'answer' && msg.sdp) {
+                                    log('Answer alındı, setRemoteDescription...');
+                                    await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+
+                                    // Add any pending ICE candidates
+                                    if (window.pendingIceCandidates && window.pendingIceCandidates.length > 0) {
+                                        log(`${window.pendingIceCandidates.length} bekleyen ICE candidate ekleniyor...`);
+                                        for (const candidate of window.pendingIceCandidates) {
+                                            try {
+                                                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                                            } catch (e) {
+                                                log('Pending ICE candidate ekleme hatası:', e.message);
+                                            }
+                                        }
+                                        window.pendingIceCandidates = [];
+                                    }
+                                    return;
+                                }
+                                if (msg.type === 'candidate' && msg.candidate) {
+                                    if (pc.remoteDescription) {
+                                        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(e => log('ICE add err', e.message));
+                                    } else {
+                                        log('ICE candidate gecici olarak saklanıyor (remote description henüz yok)');
+                                        // Store candidates to add later
+                                        if (!window.pendingIceCandidates) window.pendingIceCandidates = [];
+                                        window.pendingIceCandidates.push(msg.candidate);
+                                    }
+                                    return;
+                                }
+                            } catch (e) {
+                                log('WS message parse error:', e.message);
+                            }
+                        };
+                    } catch (error) {
+                        rej(error);
+                    }
+                });
+            }
+
+            async function tryReconnect() {
+                if (!connected) return;
+
+                try {
+                    setBadge('yeniden bağlanıyor...', 'warn');
+                    await openWs();
+                    setBadge('bağlandı', 'ok');
+                    log('WebSocket yeniden bağlandı');
+                } catch (error) {
+                    log('Yeniden bağlanma başarısız:', error.message);
+                    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                        showError('WebSocket bağlantısı kaybedildi ve yeniden bağlanılamadı');
+                        cleanup(true);
+                    }
+                }
+            }
+
+            function waitIceComplete(pc) {
+                if (pc.iceGatheringState === 'complete') return Promise.resolve();
+                return new Promise(res => {
+                    const timeout = setTimeout(() => {
+                        log('ICE gathering zaman aşımı, devam ediliyor...');
+                        res();
+                    }, 10000);
+
+                    const check = () => {
+                        if (pc.iceGatheringState === 'complete') {
+                            clearTimeout(timeout);
+                            pc.removeEventListener('icegatheringstatechange', check);
+                            res();
+                        }
+                    };
+                    pc.addEventListener('icegatheringstatechange', check);
+                });
+            }
+
+            async function createPc() {
+                pc = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ],
+                    iceCandidatePoolSize: 10
+                });
+
+                pc.addTransceiver('audio', { direction: 'sendrecv' });
+
+                pc.oniceconnectionstatechange = () => {
+                    log('ICE state:', pc.iceConnectionState);
+                    if (pc.iceConnectionState === 'failed') {
+                        log('ICE bağlantısı başarısız, yeniden başlatılıyor...');
+                        pc.restartIce();
+                    }
+                };
+
+                pc.onconnectionstatechange = () => {
+                    log('PC state:', pc.connectionState);
+                    const st = pc.connectionState;
+                    if (st === 'connected') {
+                        setBadge('bağlı', 'ok');
+                        clearErrors();
+                    } else if (st === 'failed') {
+                        setBadge('başarısız', 'err');
+                        showError('Peer bağlantısı başarısız oldu');
+                    } else if (st === 'disconnected') {
+                        setBadge('bağlantı kesildi', 'err');
+                        showError('Peer bağlantısı kesildi');
+                    } else {
+                        setBadge(st, 'warn');
+                    }
+                };
+
+                pc.ontrack = ev => {
+                    log('Uzak track geldi:', {
+                        kind: ev.track.kind,
+                        id: ev.track.id,
+                        enabled: ev.track.enabled,
+                        muted: ev.track.muted,
+                        readyState: ev.track.readyState
+                    });
+
+                    if (!remoteStream) {
+                        remoteStream = new MediaStream();
+                        audioEl.srcObject = remoteStream;
+                        log('Remote audio stream oluşturuldu');
+                    }
+                    remoteStream.addTrack(ev.track);
+
+                    // Track event listeners
+                    ev.track.onended = () => log('Remote track ended');
+                    ev.track.onmute = () => log('Remote track muted');
+                    ev.track.onunmute = () => log('Remote track unmuted');
+
+                    // Auto-play workaround
+                    audioEl.play().then(() => {
+                        log('Audio element başlatıldı');
+                    }).catch(e => {
+                        log('Audio auto-play engellendi:', e.message);
+                        showError('Ses otomatik başlatılamadı. Lütfen play butonuna tıklayın.');
+                    });
+
+                    // Audio level monitoring
+                    if (ev.track.kind === 'audio') {
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const analyser = audioContext.createAnalyser();
+                        const source = audioContext.createMediaStreamSource(new MediaStream([ev.track]));
+                        source.connect(analyser);
+
+                        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                        const checkAudioLevel = () => {
+                            analyser.getByteFrequencyData(dataArray);
+                            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                            if (average > 0) {
+                                log('Ses seviyesi algılandı:', Math.round(average));
+                            }
+                        };
+
+                        // Check audio level every 2 seconds
+                        setInterval(checkAudioLevel, 2000);
+                    }
+                };
+
+                // Mikrofon erişimi
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000
+                        },
+                        video: false
+                    });
+
+                    localStream.getAudioTracks().forEach(t => pc.addTrack(t, localStream));
+                    log('Mikrofon eklendi:', localStream.getAudioTracks()[0]?.label || 'unknown');
+
+                    muteMic.addEventListener('change', () => {
+                        localStream.getAudioTracks().forEach(t => t.enabled = !muteMic.checked);
+                        log('Mikrofon', muteMic.checked ? 'kapatıldı' : 'açıldı');
+                    });
+                } catch (error) {
+                    const errorMsg = 'Mikrofon erişimi reddedildi veya kullanılamıyor: ' + error.message;
+                    log(errorMsg);
+                    showError(errorMsg);
+                    throw new Error(errorMsg);
+                }
+            }
+
+            function cleanup(endWs = false) {
+                try {
+                    if (pc) {
+                        pc.getSenders().forEach(s => {
+                            if (s.track) {
+                                s.track.stop();
+                            }
+                        });
+                        pc.close();
+                    }
+                } catch (e) {
+                    log('PC cleanup hatası:', e.message);
+                }
+
+                try {
+                    localStream?.getTracks().forEach(t => t.stop());
+                } catch (e) {
+                    log('Local stream cleanup hatası:', e.message);
+                }
+
+                pc = null;
+                localStream = null;
+                remoteStream = null;
+                audioEl.srcObject = null;
+                reconnectAttempts = 0;
+
+                // Clear pending ICE candidates
+                if (window.pendingIceCandidates) {
+                    window.pendingIceCandidates = [];
+                }
+
+                setBadge('hazır', 'warn');
+                btnConnect.disabled = false;
+                btnHangup.disabled = true;
+                connected = false;
+
+                if (endWs && ws) {
+                    try {
+                        ws.close(1000, 'User initiated');
+                    } catch (e) {
+                        log('WS close hatası:', e.message);
+                    }
+                    ws = null;
+                }
+
+                clearErrors();
+                log('Cleanup tamamlandı');
+            }
+
+            async function connectFlow() {
+                try {
+                    clearErrors();
+                    btnConnect.disabled = true;
+                    setBadge('bağlanıyor...', 'warn');
+
+                    // Validation
+                    if (!sigUrl.value.trim()) {
+                        throw new Error('Sinyalleme URL\'si gerekli');
+                    }
+                    if (!myId.value.trim()) {
+                        throw new Error('Kendi ID\'niz gerekli');
+                    }
+                    if (!peerId.value.trim()) {
+                        throw new Error('Hedef peer ID\'si gerekli');
+                    }
+
+                    await openWs();
+                    await createPc();
+
+                    const offer = await pc.createOffer({
+                        offerToReceiveAudio: true,
+                        offerToReceiveVideo: false
+                    });
+                    await pc.setLocalDescription(offer);
+
+                    // Non-trickle: tüm ICE adaylarını topla, sonra gönder
+                    await waitIceComplete(pc);
+
+                    log('Offer oluşturuldu, gönderiliyor...');
+                    sendSig({ type: 'offer', to: peerId.value.trim(), sdp: pc.localDescription });
+
+                    btnHangup.disabled = false;
+                    connected = true;
+
+                } catch (e) {
+                    log('Bağlantı hatası:', e.message);
+                    showError('Bağlantı hatası: ' + e.message);
+                    setBadge('hata', 'err');
+                    btnConnect.disabled = false;
+                    cleanup(false);
+                }
+            }
+
+            btnConnect.addEventListener('click', () => connectFlow());
+            btnHangup.addEventListener('click', () => {
+                log('Kullanıcı bağlantıyı kesti...');
+                cleanup(true);
+            });
+
+            // Auto-play workaround for audio
+            document.addEventListener('click', () => {
+                if (audioEl.paused && audioEl.srcObject) {
+                    audioEl.play().catch(() => { });
+                }
+            }, { once: true });
+
+            // Cleanup on page unload
+            window.addEventListener('beforeunload', () => {
+                cleanup(true);
+            });
+
+            // Handle visibility change
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && connected) {
+                    log('Sayfa gizlendi, bağlantı korunuyor...');
+                } else if (!document.hidden && connected && (!ws || ws.readyState !== WebSocket.OPEN)) {
+                    log('Sayfa görünür oldu, bağlantı kontrol ediliyor...');
+                    tryReconnect();
+                }
+            });
+
+            log('WebRTC client hazır');
+        })();
+    </script>
+</body>
+
+</html>

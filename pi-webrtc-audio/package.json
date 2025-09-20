@@ -1,0 +1,44 @@
+{
+  "name": "pi-webrtc-audio",
+  "version": "1.0.1",
+  "description": "WebRTC audio bridge for Raspberry Pi - handles audio input/output via ALSA and WebRTC peer connections",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install-alsa": "sudo apt-get update && sudo apt-get install -y alsa-utils",
+    "test-audio": "arecord -D plughw:3,0 -f S16_LE -r 48000 -c 1 -t wav -d 5 test.wav && aplay test.wav && rm test.wav",
+    "list-devices": "aplay -l && arecord -l"
+  },
+  "keywords": [
+    "webrtc",
+    "raspberry-pi",
+    "audio",
+    "alsa",
+    "real-time",
+    "voice",
+    "communication"
+  ],
+  "author": "WebRTC Audio Bridge",
+  "license": "ISC",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "node-pre-gyp": "^0.17.0",
+    "nodemon": "^3.0.0"
+  },
+  "dependencies": {
+    "wrtc": "^0.4.7",
+    "ws": "^8.18.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "."
+  },
+  "bugs": {
+    "url": "."
+  },
+  "homepage": "."
+}

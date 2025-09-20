@@ -1,0 +1,25 @@
+# WebRTC Audio Bridge Configuration for Raspberry Pi
+# Copy this file to .env and customize for your setup
+
+# Signaling server URL
+SIGNALING_URL=ws://192.168.1.12:8080/ws
+
+# Unique peer identifier
+PEER_ID=raspi-1
+
+# Audio device configuration
+# Use 'aplay -l' and 'arecord -l' to list available devices
+ARECORD_DEV=plughw:3,0
+SPEAKER_DEV=plughw:3,0
+
+# Audio parameters
+SAMPLE_RATE=48000
+CHANNELS=1
+
+# Network configuration
+# Set to 1 if connecting over internet, 0 for LAN
+USE_STUN=0
+
+# Connection settings
+RECONNECT_DELAY=1500
+
