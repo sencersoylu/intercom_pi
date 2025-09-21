@@ -1,30 +1,30 @@
 // pi-webrtc-audio.js (Answerer - Raspberry Pi)
-// Non-trickle ICE: offer/answer gÃ¶nderirken tÃ¼m ICE adaylarÄ±nÄ± toplar.
-// Sinyallemede 'offer.from' -> remotePeerId; answer/candidate mesajlarÄ±nÄ± 'to: remotePeerId' ile yollar.
-// Uzak ses RTCAudioSink -> aplay (buffer/offset dÃ¼zeltmeleri). Yerel mic arecord -> RTCAudioSource.
+// Non-trickle ICE: offer/answer sending tum ICE candidates collects.
+// Sinyallemede 'offer.from' -> remotePeerId; answer/candidate messages 'to: remotePeerId' ile yollar.
+// Uzak ses RTCAudioSink -> aplay (buffer/offset corrections). Yerel mic arecord -> RTCAudioSource.
 
 const wrtc = require('wrtc');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
 
-// ====== ENV / KONFÄ°G ======
+// ====== ENV / CONFIG ======
 const SIGNALING_URL = process.env.SIGNALING_URL || 'ws://192.168.1.20:8080/ws';
 const PEER_ID = process.env.PEER_ID || 'raspi-1';
 const ARECORD_DEV = process.env.ARECORD_DEV || 'plughw:2,0';
 const SPEAKER_DEV = process.env.SPEAKER_DEV || 'plughw:2,0';
-const USE_STUN = parseInt(process.env.USE_STUN || '0'); // LAN test iÃ§in varsayÄ±lan 0
+const USE_STUN = parseInt(process.env.USE_STUN || '0'); // LAN test icin varsayilan 0
 const SAMPLE_RATE = parseInt(process.env.SAMPLE_RATE || '48000');
 const CHANNELS = parseInt(process.env.CHANNELS || '1');
 const RECONNECT_DELAY = parseInt(process.env.RECONNECT_DELAY || '1500');
 // ==========================
 
-console.log('Pi WebRTC Audio baÅlatÄ±lÄ±yor...');
-console.log('Sinyalleme URL:', SIGNALING_URL);
+console.log('Pi WebRTC Audio baslatiliyor...');
+console.log('Signaling URL:', SIGNALING_URL);
 console.log('Peer ID:', PEER_ID);
-console.log('Mikrofon device:', ARECORD_DEV);
-console.log('HoparlÃ¶r device:', SPEAKER_DEV);
+console.log('Microphone device:', ARECORD_DEV);
+console.log('Speaker device:', SPEAKER_DEV);
 console.log('Sample rate:', SAMPLE_RATE);
-console.log('Kanallar:', CHANNELS);
+console.log('Channels:', CHANNELS);
 
 let pc = null;
 let audioSource = null;
@@ -44,17 +44,17 @@ function createPeerConnection() {
 
 	// Audio track varsa direkt ekle, yoksa transceiver ekle
 	if (audioTrackOut) {
-		console.log("Mevcut audio track PC'ye ekleniyor...");
+		console.log("Existing audio track PC'ye adding...");
 		pc.addTrack(audioTrackOut);
 	} else {
-		console.log('Audio transceiver ekleniyor...');
+		console.log('Audio transceiver adding...');
 		pc.addTransceiver('audio', { direction: 'sendrecv' });
 	}
 
 	pc.oniceconnectionstatechange = () => {
 		console.log('ICE state:', pc.iceConnectionState);
 		if (pc.iceConnectionState === 'failed') {
-			console.log('ICE baÄlantÄ±sÄ± baÅarÄ±sÄ±z, yeniden baÅlatÄ±lÄ±yor...');
+			console.log('ICE baglantisi basarisiz, yeniden baslatiliyor...');
 			if (pc.restartIce) {
 				pc.restartIce();
 			}
@@ -64,7 +64,7 @@ function createPeerConnection() {
 	pc.onconnectionstatechange = () => {
 		console.log('PC state:', pc.connectionState);
 		if (pc.connectionState === 'failed') {
-			console.error('Peer baÄlantÄ±sÄ± baÅarÄ±sÄ±z oldu');
+			console.error('Peer baglantisi basarisiz oldu');
 			setTimeout(() => {
 				if (!isShuttingDown) {
 					restartAudioProcesses();
@@ -78,9 +78,9 @@ function createPeerConnection() {
 
 function startMicrophone() {
 	try {
-		// Audio source zaten hazÄ±r, sadece arecord'u baÅlat
+		// Audio source zaten hazir, sadece arecord'u baslat
 		if (!audioSource) {
-			console.log('Audio source bulunamadÄ±, yeni oluÅturuluyor...');
+			console.log('Audio source bulunamadi, yeni olusturuluyor...');
 			audioSource = new wrtc.nonstandard.RTCAudioSource();
 			audioTrackOut = audioSource.createTrack();
 		}
@@ -111,7 +111,7 @@ function startMicrophone() {
 			'--buffer-size=1920',
 			'-',
 		];
-		console.log('Mikrofon baÅlatÄ±lÄ±yor:', arecordArgs.join(' '));
+		console.log('Mikrofon baslatiliyor:', arecordArgs.join(' '));
 
 		arecord = spawn('arecord', arecordArgs);
 
@@ -123,7 +123,7 @@ function startMicrophone() {
 				dataCounter++;
 				if (dataCounter % 100 === 0) {
 					console.log(
-						`Mikrofon veri alÄ±ndÄ±: ${chunk.length} bytes (${dataCounter}. chunk)`
+						`Mikrofon veri received: ${chunk.length} bytes (${dataCounter}. chunk)`
 					);
 				}
 
@@ -154,12 +154,12 @@ function startMicrophone() {
 								numberOfFrames: frameSlice.length,
 							});
 						} catch (sourceError) {
-							console.error('AudioSource.onData hatasÄ±:', sourceError.message);
+							console.error('AudioSource.onData error:', sourceError.message);
 						}
 					}
 				}
 			} catch (error) {
-				console.error('Mikrofon veri iÅleme hatasÄ±:', error.message);
+				console.error('Mikrofon veri isleme error:', error.message);
 			}
 		});
 
@@ -171,10 +171,10 @@ function startMicrophone() {
 		});
 
 		arecord.on('exit', (code, signal) => {
-			console.log(`arecord Ã§Ä±ktÄ±: kod=${code}, sinyal=${signal}`);
+			console.log(`arecord cikti: kod=${code}, sinyal=${signal}`);
 			if (!isShuttingDown && code !== 0 && code !== null) {
 				console.log(
-					'Mikrofon beklenmedik Åekilde kapandÄ±, yeniden baÅlatÄ±lÄ±yor...'
+					'Mikrofon beklenmedik sekilde kapandi, yeniden baslatiliyor...'
 				);
 				setTimeout(() => {
 					if (!isShuttingDown) {
@@ -185,15 +185,15 @@ function startMicrophone() {
 		});
 
 		arecord.on('error', (error) => {
-			console.error('arecord hatasÄ±:', error.message);
+			console.error('arecord error:', error.message);
 			if (!isShuttingDown) {
 				setTimeout(() => startMicrophone(), 2000);
 			}
 		});
 
-		console.log('Mikrofon baÅlatÄ±ldÄ±');
+		console.log('Mikrofon baslatildi');
 	} catch (error) {
-		console.error('Mikrofon baÅlatma hatasÄ±:', error.message);
+		console.error('Mikrofon baslatma error:', error.message);
 		if (!isShuttingDown) {
 			setTimeout(() => startMicrophone(), 2000);
 		}
@@ -201,7 +201,7 @@ function startMicrophone() {
 }
 
 function restartAudioProcesses() {
-	console.log('Ses iÅlemleri yeniden baÅlatÄ±lÄ±yor...');
+	console.log('Ses islemleri yeniden baslatiliyor...');
 	stopMicrophone();
 	stopSpeaker();
 	setTimeout(() => {
@@ -216,7 +216,7 @@ function stopMicrophone() {
 		try {
 			arecord.kill('SIGTERM');
 		} catch (error) {
-			console.error('Mikrofon durdurma hatasÄ±:', error.message);
+			console.error('Mikrofon durdurma error:', error.message);
 		}
 		arecord = null;
 	}
@@ -225,7 +225,7 @@ function stopMicrophone() {
 		try {
 			audioTrackOut.stop();
 		} catch (error) {
-			console.error('Audio track durdurma hatasÄ±:', error.message);
+			console.error('Audio track durdurma error:', error.message);
 		}
 		audioTrackOut = null;
 	}
@@ -250,10 +250,10 @@ function startSpeaker() {
 			'1200000',
 			'-F',
 			'60000',
-		]; // daha geniÅ tampon
+		]; // daha genis tampon
 		if (SPEAKER_DEV) args.push('-D', SPEAKER_DEV);
 
-		console.log('HoparlÃ¶r baÅlatÄ±lÄ±yor:', args.join(' '));
+		console.log('Hoparlor baslatiliyor:', args.join(' '));
 		speakerProc = spawn('aplay', args);
 
 		speakerProc.stderr.on('data', (d) => {
@@ -264,11 +264,11 @@ function startSpeaker() {
 		});
 
 		speakerProc.on('exit', (code, signal) => {
-			console.log(`aplay Ã§Ä±ktÄ±: kod=${code}, sinyal=${signal}`);
+			console.log(`aplay cikti: kod=${code}, sinyal=${signal}`);
 			speakerProc = null;
 			if (!isShuttingDown && code !== 0 && code !== null) {
 				console.log(
-					'HoparlÃ¶r beklenmedik Åekilde kapandÄ±, yeniden baÅlatÄ±lÄ±yor...'
+					'Hoparlor beklenmedik sekilde kapandi, yeniden baslatiliyor...'
 				);
 				setTimeout(() => {
 					if (!isShuttingDown) {
@@ -279,16 +279,16 @@ function startSpeaker() {
 		});
 
 		speakerProc.on('error', (error) => {
-			console.error('aplay hatasÄ±:', error.message);
+			console.error('aplay error:', error.message);
 			speakerProc = null;
 			if (!isShuttingDown) {
 				setTimeout(() => startSpeaker(), 2000);
 			}
 		});
 
-		console.log('HoparlÃ¶r baÅlatÄ±ldÄ±');
+		console.log('Hoparlor baslatildi');
 	} catch (error) {
-		console.error('HoparlÃ¶r baÅlatma hatasÄ±:', error.message);
+		console.error('Hoparlor baslatma error:', error.message);
 		speakerProc = null;
 		if (!isShuttingDown) {
 			setTimeout(() => startSpeaker(), 2000);
@@ -301,7 +301,7 @@ function stopSpeaker() {
 		try {
 			sink.stop();
 		} catch (error) {
-			console.error('Audio sink durdurma hatasÄ±:', error.message);
+			console.error('Audio sink durdurma error:', error.message);
 		}
 		sink = null;
 	}
@@ -313,7 +313,7 @@ function stopSpeaker() {
 			}
 			speakerProc.kill('SIGTERM');
 		} catch (error) {
-			console.error('HoparlÃ¶r durdurma hatasÄ±:', error.message);
+			console.error('Hoparlor durdurma error:', error.message);
 		}
 		speakerProc = null;
 	}
@@ -367,13 +367,13 @@ function setupRemoteAudioTrack() {
 						}
 					}
 				} catch (error) {
-					console.error('Audio data iÅleme hatasÄ±:', error.message);
+					console.error('Audio data isleme error:', error.message);
 				}
 			}
 
 			sink.ondata = onData;
 
-			// Audio data timeout kontrolÃ¼
+			// Audio data timeout kontrolu
 			const checkAudioTimeout = setInterval(() => {
 				if (isShuttingDown) {
 					clearInterval(checkAudioTimeout);
@@ -382,9 +382,7 @@ function setupRemoteAudioTrack() {
 
 				if (Date.now() - lastDataTime > 5000) {
 					// 5 saniye sessizlik
-					console.log(
-						'Audio veri akÄ±ÅÄ± durdu, baÄlantÄ± kontrol ediliyor...'
-					);
+					console.log('Audio veri akisi durdu, baglanti kontrol continuing...');
 					clearInterval(checkAudioTimeout);
 				}
 			}, 2000);
@@ -399,7 +397,7 @@ function setupRemoteAudioTrack() {
 						sink = null;
 					}
 				} catch (error) {
-					console.error('Sink durdurma hatasÄ±:', error.message);
+					console.error('Sink durdurma error:', error.message);
 				}
 
 				stopSpeaker();
@@ -413,7 +411,7 @@ function setupRemoteAudioTrack() {
 				console.log('Remote audio track unmuted');
 			};
 		} catch (error) {
-			console.error('Remote audio track kurulum hatasÄ±:', error.message);
+			console.error('Remote audio track kurulum error:', error.message);
 		}
 	};
 }
@@ -428,7 +426,7 @@ function waitIceComplete(pc) {
 	if (pc.iceGatheringState === 'complete') return Promise.resolve();
 	return new Promise((res) => {
 		const timeout = setTimeout(() => {
-			console.log('ICE gathering zaman aÅÄ±mÄ±, devam ediliyor...');
+			console.log('ICE gathering time asimi, devam continuing...');
 			res();
 		}, 15000); // 15 saniye timeout
 
@@ -447,14 +445,14 @@ function setupIceCandidateHandler() {
 	if (!pc) return;
 
 	pc.onicecandidate = ({ candidate }) => {
-		// Non-trickle moddayÄ±z; yine de ileride gerekirse dursun
+		// Non-trickle moddayiz; yine de ileride gerekirse dursun
 		if (candidate && ws?.readyState === 1 && remotePeerId && !isShuttingDown) {
 			try {
 				ws.send(
 					JSON.stringify({ type: 'candidate', to: remotePeerId, candidate })
 				);
 			} catch (error) {
-				console.error('ICE candidate gÃ¶nderme hatasÄ±:', error.message);
+				console.error('ICE candidate sendme error:', error.message);
 			}
 		}
 	};
@@ -466,20 +464,20 @@ function connectSignaling() {
 	try {
 		const u = new URL(SIGNALING_URL);
 		u.searchParams.set('id', PEER_ID);
-		console.log('Sinyalleme sunucusuna baÄlanÄ±lÄ±yor:', u.toString());
+		console.log('Sinyalleme sunucusuna baglaniliyor:', u.toString());
 
 		ws = new WebSocket(u);
 
 		const connectionTimeout = setTimeout(() => {
 			if (ws && ws.readyState === WebSocket.CONNECTING) {
-				console.error('Sinyalleme baÄlantÄ± zaman aÅÄ±mÄ±');
+				console.error('Sinyalleme baglanti time asimi');
 				ws.terminate();
 			}
 		}, 10000);
 
 		ws.on('open', () => {
 			clearTimeout(connectionTimeout);
-			console.log('Sinyalleme baÄlÄ±. Pi hazÄ±r (answerer).');
+			console.log('Sinyalleme bagli. Pi hazir (answerer).');
 			isConnected = true;
 
 			if (reconnectTimeout) {
@@ -497,14 +495,14 @@ function connectSignaling() {
 		ws.on('close', (code, reason) => {
 			clearTimeout(connectionTimeout);
 			console.log(
-				`Sinyalleme kapandÄ± (kod: ${code}, sebep: ${
+				`Sinyalleme kapandi (kod: ${code}, sebep: ${
 					reason?.toString() || 'bilinmiyor'
 				})`
 			);
 			isConnected = false;
 
 			if (!isShuttingDown) {
-				console.log(`${RECONNECT_DELAY}ms sonra yeniden baÄlanÄ±lacak...`);
+				console.log(`${RECONNECT_DELAY}ms sonra yeniden baglanilacak...`);
 				reconnectTimeout = setTimeout(() => {
 					if (!isShuttingDown) {
 						connectSignaling();
@@ -520,13 +518,13 @@ function connectSignaling() {
 				const data = JSON.parse(msgBuf.toString());
 
 				if (data.type === 'system') {
-					console.log('Sistem mesajÄ±:', data.event, data.id || '');
+					console.log('Sistem mesaji:', data.event, data.id || '');
 					return;
 				}
 
 				if (data.type === 'offer' && data.sdp) {
-					remotePeerId = data.from; // kritik: hedefi Ã¶Ären
-					console.log('Offer alÄ±ndÄ±, from:', remotePeerId);
+					remotePeerId = data.from; // kritik: target ogren
+					console.log('Offer received, from:', remotePeerId);
 
 					if (!pc) {
 						pc = createPeerConnection();
@@ -534,7 +532,7 @@ function connectSignaling() {
 						setupRemoteAudioTrack();
 					}
 
-					// Audio track'i offer almadan Ã¶nce ekleyelim
+					// Audio track'i offer almadan once ekleyelim
 					if (!audioTrackOut) {
 						startMicrophone();
 					}
@@ -549,16 +547,13 @@ function connectSignaling() {
 						global.pendingIceCandidates.length > 0
 					) {
 						console.log(
-							`${global.pendingIceCandidates.length} bekleyen ICE candidate ekleniyor...`
+							`${global.pendingIceCandidates.length} bekleyen ICE candidate adding...`
 						);
 						for (const candidate of global.pendingIceCandidates) {
 							try {
 								await pc.addIceCandidate(new wrtc.RTCIceCandidate(candidate));
 							} catch (e) {
-								console.error(
-									'Pending ICE candidate ekleme hatasÄ±:',
-									e.message
-								);
+								console.error('Pending ICE candidate ekleme error:', e.message);
 							}
 						}
 						global.pendingIceCandidates = [];
@@ -567,7 +562,7 @@ function connectSignaling() {
 					const answer = await pc.createAnswer();
 					await pc.setLocalDescription(answer);
 
-					// Non-trickle: tÃ¼m ICE adaylarÄ±nÄ± topla, sonra gÃ¶nder
+					// Non-trickle: tum ICE candidates topla, sonra send
 					await waitIceComplete(pc);
 
 					console.log('Send answer ->', remotePeerId);
@@ -586,7 +581,7 @@ function connectSignaling() {
 						await pc.addIceCandidate(new wrtc.RTCIceCandidate(data.candidate));
 					} else {
 						console.log(
-							'ICE candidate gecici olarak saklanÄ±yor (remote description henÃ¼z yok)'
+							'ICE candidate gecici olarak storing (remote description henuz yok)'
 						);
 						// Store candidates to add later
 						if (!global.pendingIceCandidates) global.pendingIceCandidates = [];
@@ -595,11 +590,11 @@ function connectSignaling() {
 					return;
 				}
 			} catch (e) {
-				console.error('Sinyalleme mesaj hatasÄ±:', e.message);
+				console.error('Sinyalleme mesaj error:', e.message);
 			}
 		});
 	} catch (error) {
-		console.error('Sinyalleme baÄlantÄ± kurma hatasÄ±:', error.message);
+		console.error('Sinyalleme baglanti kurma error:', error.message);
 		if (!isShuttingDown) {
 			reconnectTimeout = setTimeout(() => {
 				if (!isShuttingDown) {
@@ -612,7 +607,7 @@ function connectSignaling() {
 
 // Graceful shutdown handling
 function gracefulShutdown() {
-	console.log('Graceful shutdown baÅlatÄ±lÄ±yor...');
+	console.log('Graceful shutdown baslatiliyor...');
 	isShuttingDown = true;
 
 	if (reconnectTimeout) {
@@ -632,7 +627,7 @@ function gracefulShutdown() {
 		try {
 			pc.close();
 		} catch (error) {
-			console.error('PC kapatma hatasÄ±:', error.message);
+			console.error('PC kapatma error:', error.message);
 		}
 		pc = null;
 	}
@@ -641,12 +636,12 @@ function gracefulShutdown() {
 		try {
 			ws.close(1000, 'Shutdown');
 		} catch (error) {
-			console.error('WS kapatma hatasÄ±:', error.message);
+			console.error('WS kapatma error:', error.message);
 		}
 		ws = null;
 	}
 
-	console.log('Shutdown tamamlandÄ±');
+	console.log('Shutdown tamamlandi');
 	process.exit(0);
 }
 
@@ -657,29 +652,29 @@ process.on('SIGHUP', gracefulShutdown);
 
 // Uncaught exception handler
 process.on('uncaughtException', (error) => {
-	console.error('YakalanmamÄ±Å hata:', error);
+	console.error('Yakalanmamis hata:', error);
 	gracefulShutdown();
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-	console.error('Ä°ÅlenmemiÅ promise reddi:', reason);
+	console.error('g°slenmemis promise reddi:', reason);
 	console.error('Promise:', promise);
 });
 
 // Start the application
-console.log('Uygulama baÅlatÄ±lÄ±yor...');
+console.log('Uygulama baslatiliyor...');
 
-// Audio source'u Ã¶nceden hazÄ±rla
-console.log('Audio source hazÄ±rlanÄ±yor...');
+// Audio source'u onceden hazirla
+console.log('Audio source hazirlaniyor...');
 audioSource = new wrtc.nonstandard.RTCAudioSource();
 audioTrackOut = audioSource.createTrack();
-console.log('Audio track oluÅturuldu:', {
+console.log('Audio track olusturuldu:', {
 	trackId: audioTrackOut.id,
 	trackKind: audioTrackOut.kind,
 	trackEnabled: audioTrackOut.enabled,
 });
 
-// Mikrofon veri akÄ±ÅÄ±nÄ± baÅlat
+// Mikrofon veri akisini baslat
 startMicrophone();
 
 connectSignaling();
