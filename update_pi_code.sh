@@ -1,41 +1,43 @@
 #!/bin/bash
 
-echo "🔄 Raspberry Pi kod güncelleme"
-echo "=============================="
+echo "🔄 Raspberry Pi code update"
+echo "============================"
 
-# Pi'ya güncellenmiş index.js kopyala
-echo "Pi'ya güncellenmiş kod kopyalanıyor..."
+echo "Copying the updated code to the Pi..."
 
-# Method 1: SCP ile kopyala
+# Method 1: copy with SCP
 if scp pi-webrtc-audio/index.js hbo@192.168.1.12:~/webrtc/pi-webrtc-audio/ 2>/dev/null; then
-    echo "✅ Kod başarıyla kopyalandı"
+    echo "✅ Code copied successfully"
 else
-    echo "❌ SCP başarısız, manuel kopyalama gerekli"
+    echo "❌ SCP failed; manual copy required"
     echo ""
-    echo "Manual olarak şunu yapın:"
-    echo "1. Pi'da nano ~/webrtc/pi-webrtc-audio/index.js"
-    echo "2. Dosyayı tamamen silin"
-    echo "3. Aşağıdaki içeriği yapıştırın:"
+    echo "Perform the following manually:"
+    echo "1. On the Pi run: nano ~/webrtc/pi-webrtc-audio/index.js"
+    echo "2. Clear the file contents"
+    echo "3. Paste the content shown below"
     echo ""
-    echo "=== KOD BAŞLANGICI ==="
+    echo "=== BEGIN CODE ==="
     cat pi-webrtc-audio/index.js
-    echo "=== KOD SONU ==="
+    echo "=== END CODE ==="
 fi
 
 echo ""
-echo "Pi'da şu komutları çalıştırın:"
+echo "Run these commands on the Pi:"
 echo ""
-echo "1. Eski process'i durdurun:"
+echo "1. Stop the existing process:"
 echo "   pkill -f 'node index.js'"
-echo ""
-echo "2. WebRTC client'ı debug modda başlatın:"
+
+
+echo "2. Start the WebRTC client in debug mode:"
 echo "   cd ~/webrtc/pi-webrtc-audio"
 echo "   ARECORD_DEV=plughw:2,0 SPEAKER_DEV=plughw:2,0 node index.js"
+
 echo ""
-echo "3. Aşağıdaki logları görmelisiniz:"
-echo "   - 'Audio track WebRTC'ye eklendi'"
-echo "   - 'Mikrofon veri alındı: X bytes'"
+echo "3. You should see logs similar to:"
+echo "   - 'Audio track added to WebRTC'"
+echo "   - 'Microphone data received: X bytes'"
+
 echo ""
-echo "4. Web'de de şu logları kontrol edin:"
-echo "   - 'Uzak track geldi'"
-echo "   - 'Ses seviyesi algılandı'"
+echo "4. In the web UI verify logs such as:"
+echo "   - 'Remote track received'"
+echo "   - 'Audio level detected'"

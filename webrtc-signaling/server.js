@@ -48,11 +48,11 @@ app.get('/peers', (req, res) => {
 const wss = new WebSocketServer({
 	server,
 	path: '/ws',
-	perMessageDeflate: false, // Performans iÃ§in
+	perMessageDeflate: false, // Disabled to keep latency predictable
 });
 
 const peers = new Map();
-const messageQueue = new Map(); // GeÃ§ici mesaj kuyruÄu
+const messageQueue = new Map(); // Temporary message queue (reserved for future use)
 let totalConnections = 0;
 let totalMessages = 0;
 
@@ -71,8 +71,8 @@ function broadcastSystemMessage(event, data = {}) {
 		if (ws.readyState === 1) {
 			try {
 				ws.send(message);
-			} catch (error) {
-				logActivity(`Sistem mesajÄ± gÃ¶nderme hatasÄ±: ${error.message}`);
+				} catch (error) {
+					logActivity(`System message delivery error: ${error.message}`);
 			}
 		}
 	});
@@ -83,7 +83,7 @@ function cleanupPeer(id, ws) {
 		peers.delete(id);
 		logActivity(`Peer disconnected: ${id} (total: ${peers.size})`);
 
-		// Disconnect mesajÄ±nÄ± diÄer peer'lara bildir
+			// Notify other peers about the disconnect event
 		broadcastSystemMessage('peer_disconnected', { id });
 	}
 }
@@ -113,7 +113,7 @@ wss.on('connection', (ws, req) => {
 			return ws.close(1008, 'Invalid peer ID format');
 		}
 
-		// Ãnceki baÄlantÄ±yÄ± temizle
+			// Terminate any previous connection that still exists
 		if (peers.has(peerId)) {
 			const oldWs = peers.get(peerId);
 			try {
@@ -134,7 +134,7 @@ wss.on('connection', (ws, req) => {
 			`Peer connected: ${peerId} from ${clientIP} (total: ${peers.size})`
 		);
 
-		// Welcome mesajÄ± gÃ¶nder
+			// Send a welcome message to the new peer
 		try {
 			ws.send(
 				JSON.stringify({
@@ -149,7 +149,7 @@ wss.on('connection', (ws, req) => {
 			logActivity(`Welcome message send error: ${error.message}`);
 		}
 
-		// DiÄer peer'lara bildir
+			// Broadcast the new peer to the rest of the network
 		broadcastSystemMessage('peer_connected', { id: peerId });
 	} catch (error) {
 		logActivity(`Connection setup error: ${error.message}`);
@@ -168,7 +168,7 @@ wss.on('connection', (ws, req) => {
 		} else {
 			clearInterval(heartbeatInterval);
 		}
-	}, 30000); // 30 saniye
+	}, 30000); // 30 seconds
 
 	ws.on('pong', () => {
 		ws.lastActivity = Date.now();
@@ -300,7 +300,7 @@ wss.on('error', (error) => {
 // Cleanup inactive connections
 setInterval(() => {
 	const now = Date.now();
-	const timeout = 60000; // 1 dakika
+	const timeout = 60000; // 1 minute
 
 	peers.forEach((ws, id) => {
 		if (now - ws.lastActivity > timeout) {
@@ -312,13 +312,13 @@ setInterval(() => {
 			}
 		}
 	});
-}, 30000); // Her 30 saniyede kontrol et
+	}, 30000); // Check every 30 seconds
 
 // Graceful shutdown
 function gracefulShutdown() {
 	logActivity('Starting graceful shutdown...');
 
-	// TÃ¼m baÄlantÄ±larÄ± kapat
+	// Close all active connections
 	peers.forEach((ws, id) => {
 		try {
 			ws.close(1001, 'Server shutting down');
