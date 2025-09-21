@@ -1,7 +1,7 @@
 // pi-webrtc-audio.js (Answerer - Raspberry Pi)
-// Non-trickle ICE: offer/answer sending tum ICE candidates collects.
-// Sinyallemede 'offer.from' -> remotePeerId; answer/candidate messages 'to: remotePeerId' ile yollar.
-// Uzak ses RTCAudioSink -> aplay (buffer/offset corrections). Yerel mic arecord -> RTCAudioSource.
+// Non-trickle ICE: offer/answer sending after collecting all ICE candidates.
+// In signaling 'offer.from' -> remotePeerId; answer/candidate messages sent with 'to: remotePeerId'.
+// Remote audio RTCAudioSink -> aplay (buffer/offset corrections). Local mic arecord -> RTCAudioSource.
 
 const wrtc = require('wrtc');
 const WebSocket = require('ws');
@@ -12,7 +12,7 @@ const SIGNALING_URL = process.env.SIGNALING_URL || 'ws://192.168.1.20:8080/ws';
 const PEER_ID = process.env.PEER_ID || 'raspi-1';
 const ARECORD_DEV = process.env.ARECORD_DEV || 'plughw:2,0';
 const SPEAKER_DEV = process.env.SPEAKER_DEV || 'plughw:2,0';
-const USE_STUN = parseInt(process.env.USE_STUN || '0'); // LAN test icin varsayilan 0
+const USE_STUN = parseInt(process.env.USE_STUN || '0'); // Default 0 for LAN testing
 const SAMPLE_RATE = parseInt(process.env.SAMPLE_RATE || '48000');
 const CHANNELS = parseInt(process.env.CHANNELS || '1');
 const RECONNECT_DELAY = parseInt(process.env.RECONNECT_DELAY || '1500');
