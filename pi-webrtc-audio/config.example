@@ -23,3 +23,26 @@ USE_STUN=0
 # Connection settings
 RECONNECT_DELAY=1500
 
+# Audio direction
+# When set to 1, disable microphone (recvonly playback mode)
+DISABLE_MIC=1
+
+# ===== AUDIO BACKEND =====
+# PulseAudio mode (recommended) - prevents "Device busy" errors
+# Set to 1 for PulseAudio (paplay/parec), 0 for ALSA (aplay/arecord)
+USE_PULSEAUDIO=1
+
+# PulseAudio device names (optional - empty uses system default)
+# Use 'pactl list sinks short' to list output devices
+# Use 'pactl list sources short' to list input devices
+PULSE_SINK=
+PULSE_SOURCE=
+
+# ===== ALSA SETTINGS (only used when USE_PULSEAUDIO=0) =====
+# Low-latency playback (aplay) buffer/period in microseconds
+APLAY_BUFFER_US=40000
+APLAY_PERIOD_US=10000
+
+# RTCAudioSink frame size in milliseconds (10 recommended)
+SINK_FRAME_MS=10
+

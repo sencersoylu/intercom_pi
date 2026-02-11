@@ -182,6 +182,8 @@
                 <div>
                     <button id="btnConnect">Bağlan</button>
                     <button id="btnHangup" class="ghost" disabled>Kes</button>
+                    <button id="btnDoor" class="ghost" disabled>Kapı sesi çal</button>
+                    <button id="btnDoorStop" class="ghost" disabled>Kapı sesini durdur</button>
                 </div>
                 <div>
                     <label style="display:inline-flex; gap:6px; align-items:center;">
@@ -206,7 +208,7 @@
     <script>
         (() => {
             const $ = id => document.getElementById(id);
-            const logEl = $('log'), pcStateEl = $('pcState'), btnConnect = $('btnConnect'), btnHangup = $('btnHangup');
+            const logEl = $('log'), pcStateEl = $('pcState'), btnConnect = $('btnConnect'), btnHangup = $('btnHangup'), btnDoor = $('btnDoor'), btnDoorStop = $('btnDoorStop');
             const muteMic = $('muteMic'), audioEl = $('remoteAudio'), sigUrl = $('sigUrl'), myId = $('myId'), peerId = $('peerId');
             const errorContainer = $('errorContainer');
 
@@ -215,6 +217,12 @@
             let ws = null, pc = null, localStream = null, remoteStream = null, connected = false;
             let reconnectAttempts = 0;
             const MAX_RECONNECT_ATTEMPTS = 5;
+
+            function updateDoorButton() {
+                const ready = ws && ws.readyState === WebSocket.OPEN && peerId.value.trim().length > 0;
+                btnDoor.disabled = !ready;
+                btnDoorStop.disabled = !ready;
+            }
 
             function log(...a) {
                 const timestamp = new Date().toLocaleTimeString();
@@ -274,6 +282,7 @@
                             clearTimeout(timeout);
                             log('WS bağlı:', u.toString());
                             reconnectAttempts = 0;
+                            updateDoorButton();
                             res();
                         };
 
@@ -286,6 +295,8 @@
                         ws.onclose = (event) => {
                             clearTimeout(timeout);
                             log(`WS kapandı (kod: ${event.code}, sebep: ${event.reason})`);
+                            btnDoor.disabled = true;
+                            btnDoorStop.disabled = true;
                             if (connected && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                                 reconnectAttempts++;
                                 log(`Yeniden bağlanma denemesi ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
@@ -530,6 +541,8 @@
                 setBadge('hazır', 'warn');
                 btnConnect.disabled = false;
                 btnHangup.disabled = true;
+                btnDoor.disabled = true;
+                btnDoorStop.disabled = true;
                 connected = false;
 
                 if (endWs && ws) {
@@ -594,6 +607,28 @@
                 log('Kullanıcı bağlantıyı kesti...');
                 cleanup(true);
             });
+
+            btnDoor.addEventListener('click', () => {
+                const toId = peerId.value.trim();
+                if (!toId) {
+                    showError('Hedef peer ID gerekli');
+                    return;
+                }
+                log('Kapı sesi komutu gönderiliyor...');
+                sendSig({ type: 'command', to: toId, command: 'play_door_close' });
+            });
+
+            btnDoorStop.addEventListener('click', () => {
+                const toId = peerId.value.trim();
+                if (!toId) {
+                    showError('Hedef peer ID gerekli');
+                    return;
+                }
+                log('Kapı sesi durdur komutu gönderiliyor...');
+                sendSig({ type: 'command', to: toId, command: 'stop_effect' });
+            });
+
+            peerId.addEventListener('input', updateDoorButton);
 
             // Auto-play workaround for audio
             document.addEventListener('click', () => {

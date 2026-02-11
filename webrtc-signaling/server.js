@@ -71,8 +71,8 @@ function broadcastSystemMessage(event, data = {}) {
 		if (ws.readyState === 1) {
 			try {
 				ws.send(message);
-				} catch (error) {
-					logActivity(`System message delivery error: ${error.message}`);
+			} catch (error) {
+				logActivity(`System message delivery error: ${error.message}`);
 			}
 		}
 	});
@@ -83,7 +83,7 @@ function cleanupPeer(id, ws) {
 		peers.delete(id);
 		logActivity(`Peer disconnected: ${id} (total: ${peers.size})`);
 
-			// Notify other peers about the disconnect event
+		// Notify other peers about the disconnect event
 		broadcastSystemMessage('peer_disconnected', { id });
 	}
 }
@@ -113,7 +113,7 @@ wss.on('connection', (ws, req) => {
 			return ws.close(1008, 'Invalid peer ID format');
 		}
 
-			// Terminate any previous connection that still exists
+		// Terminate any previous connection that still exists
 		if (peers.has(peerId)) {
 			const oldWs = peers.get(peerId);
 			try {
@@ -134,7 +134,7 @@ wss.on('connection', (ws, req) => {
 			`Peer connected: ${peerId} from ${clientIP} (total: ${peers.size})`
 		);
 
-			// Send a welcome message to the new peer
+		// Send a welcome message to the new peer
 		try {
 			ws.send(
 				JSON.stringify({
@@ -149,7 +149,7 @@ wss.on('connection', (ws, req) => {
 			logActivity(`Welcome message send error: ${error.message}`);
 		}
 
-			// Broadcast the new peer to the rest of the network
+		// Broadcast the new peer to the rest of the network
 		broadcastSystemMessage('peer_connected', { id: peerId });
 	} catch (error) {
 		logActivity(`Connection setup error: ${error.message}`);
@@ -312,7 +312,7 @@ setInterval(() => {
 			}
 		}
 	});
-	}, 30000); // Check every 30 seconds
+}, 30000); // Check every 30 seconds
 
 // Graceful shutdown
 function gracefulShutdown() {

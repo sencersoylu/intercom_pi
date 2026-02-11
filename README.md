@@ -102,10 +102,41 @@ cd webrtc-signaling && npm install && cd ..
 cd pi-webrtc-audio && npm install && cd ..
 ```
 
-#### 2. Raspberry Pi Setup
+#### 2. Raspberry Pi Audio Setup
+
+##### Option A: PulseAudio (Recommended)
+
+PulseAudio prevents "Device busy" errors and allows multiple audio streams.
 
 ```bash
-# Audio system installation
+# Install PulseAudio
+sudo apt-get update
+sudo apt-get install -y pulseaudio pulseaudio-utils
+
+# Start PulseAudio (runs in user mode)
+pulseaudio --start
+
+# Auto-start PulseAudio on boot
+systemctl --user enable pulseaudio
+
+# List audio devices
+pactl list sinks short    # Output devices (speakers)
+pactl list sources short  # Input devices (microphones)
+
+# Test audio
+parecord --raw test.raw   # Record 5 seconds, then Ctrl+C
+paplay --raw test.raw     # Playback
+
+# Loopback test (mic → speaker)
+parec --raw | paplay --raw
+```
+
+##### Option B: ALSA (Legacy)
+
+Use this if PulseAudio is not available or causing issues.
+
+```bash
+# Install ALSA utilities
 sudo apt-get update
 sudo apt-get install -y alsa-utils
 
@@ -117,6 +148,8 @@ arecord -l  # Recording devices
 arecord -D plughw:3,0 -f S16_LE -r 48000 -c 1 -t wav -d 3 test.wav
 aplay test.wav
 ```
+
+To use ALSA mode, set `USE_PULSEAUDIO=0` in your `.env` file.
 
 #### 3. Configuration Files
 
@@ -164,7 +197,16 @@ pm2 startup
 SIGNALING_URL=ws://192.168.1.12:8080/ws
 PEER_ID=raspi-1
 
-# Audio device settings (check with aplay -l and arecord -l)
+# Audio backend (recommended: PulseAudio)
+USE_PULSEAUDIO=1            # 1 for PulseAudio, 0 for ALSA
+
+# PulseAudio device settings (leave empty for system default)
+# Use 'pactl list sinks short' and 'pactl list sources short' to find devices
+PULSE_SINK=                 # Speaker device (e.g., alsa_output.usb-...)
+PULSE_SOURCE=               # Microphone device (e.g., alsa_input.usb-...)
+
+# ALSA device settings (only used when USE_PULSEAUDIO=0)
+# Use 'aplay -l' and 'arecord -l' to find devices
 ARECORD_DEV=plughw:3,0      # Microphone device
 SPEAKER_DEV=plughw:3,0      # Speaker device
 
@@ -294,7 +336,34 @@ http://localhost:8889/cam1enc/
 
 #### 🎤 Audio Issues
 
-**Problem:** Microphone not working
+**Problem:** "Device or resource busy" error
+
+```bash
+# Solution: Switch to PulseAudio (recommended)
+# In .env file:
+USE_PULSEAUDIO=1
+
+# Or kill orphan audio processes
+pkill -9 aplay arecord paplay parec
+```
+
+**Problem:** Microphone not working (PulseAudio)
+
+```bash
+# Check PulseAudio is running
+pulseaudio --check && echo "Running" || pulseaudio --start
+
+# List available sources
+pactl list sources short
+
+# Set default source
+pactl set-default-source <source-name>
+
+# Test recording
+parec --raw test.raw && paplay --raw test.raw
+```
+
+**Problem:** Microphone not working (ALSA)
 
 ```bash
 # Solution 1: Check audio devices
@@ -313,12 +382,15 @@ sudo service alsa-state restart
 **Problem:** No sound from speakers
 
 ```bash
-# Test audio playback
+# PulseAudio test
+paplay /usr/share/sounds/alsa/Front_Center.wav
+
+# ALSA test
 speaker-test -c 1 -t wav
 
-# ALSA volume levels
-amixer set Master 80%
-amixer set PCM 80%
+# Volume levels
+pactl set-sink-volume @DEFAULT_SINK@ 80%  # PulseAudio
+amixer set Master 80%                      # ALSA
 ```
 
 #### 🌐 Connection Issues

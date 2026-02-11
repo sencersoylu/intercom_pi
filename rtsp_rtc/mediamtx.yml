@@ -391,7 +391,7 @@ webrtcLocalUDPAddress: :8189
 # Address of a local TCP listener that will receive connections.
 # This is disabled by default since TCP is less efficient than UDP and
 # introduces a progressive delay when network is congested.
-webrtcLocalTCPAddress: ''
+webrtcLocalTCPAddress: :8190
 # WebRTC clients need to know the IP of the server.
 # Gather IPs from interfaces and send them to clients.
 webrtcIPsFromInterfaces: yes
@@ -412,11 +412,11 @@ webrtcICEServers2:
   # password: ''
   # clientOnly: false
 # Time to wait for the WebRTC handshake to complete.
-webrtcHandshakeTimeout: 10s
+webrtcHandshakeTimeout: 30s
 # Maximum time to gather video tracks.
-webrtcTrackGatherTimeout: 2s
+webrtcTrackGatherTimeout: 5s
 # The maximum time to gather STUN candidates.
-webrtcSTUNGatherTimeout: 5s
+webrtcSTUNGatherTimeout: 15s
 
 ###############################################
 # Global settings -> SRT server
@@ -763,25 +763,27 @@ pathDefaults:
 # for example "~^prefix" will match all paths that start with "prefix".
 paths:
   cam1:
-    source: rtsp://admin:sencer77@192.168.1.105:554
+    source: rtsp://admin:sencer77@192.168.77.105:554
+    sourceOnDemand: yes
     # TCP transport for better reliability
     rtspTransport: tcp
     # Increase buffer size for packet loss mitigation
     rtspUDPReadBufferSize: 0
     # Longer timeout for unstable network
-    sourceOnDemandStartTimeout: 30s
+    sourceOnDemandStartTimeout: 60s
     sourceOnDemandCloseAfter: 60s
+
   cam1enc:
     # İlk izleyici bağlandığında FFmpeg'i çalıştır (boştayken kaynak tüketmez)
     runOnDemand: >
-      ffmpeg -rtsp_transport tcp -i rtsp://admin:sencer77@192.168.1.105:554
+      ffmpeg -rtsp_transport tcp -stimeout 10000000 -i rtsp://admin:sencer77@192.168.77.105:554
       -analyzeduration 0 -fflags nobuffer -flags low_delay -fflags +genpts
       -c:v libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency 
       -bf 0 -g 30 -keyint_min 30 -sc_threshold 0 -b:v 1500k
       -c:a libopus -ac 1 -b:a 64k
       -f rtsp rtsp://127.0.0.1:8554/cam1enc
     runOnDemandRestart: yes
-    runOnDemandStartTimeout: 30s
+    runOnDemandStartTimeout: 60s
     runOnDemandCloseAfter: 60s
 
   # example:
