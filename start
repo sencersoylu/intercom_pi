@@ -1,0 +1,9 @@
+sudo nano /usr/local/bin/wait-for-camera.sh
+
+sudo systemctl edit pm2-root.service 
+
+[Service]
+ExecStartPre=/usr/local/bin/wait-for-camera.sh
+
+sudo systemctl reload pm2-root.service
+sudo systemctl daemon-reload

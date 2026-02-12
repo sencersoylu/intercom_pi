@@ -19,7 +19,6 @@ const SAMPLE_RATE = parseInt(process.env.SAMPLE_RATE || '48000');
 const CHANNELS = parseInt(process.env.CHANNELS || '1');
 const RECONNECT_DELAY = parseInt(process.env.RECONNECT_DELAY || '1500');
 const DISABLE_MIC = parseInt(process.env.DISABLE_MIC || '1');
-const IDLE_RESET_MS = parseInt(process.env.IDLE_RESET_MS || '120000');
 // PulseAudio mode (recommended) - prevents "Device busy" errors
 const USE_PULSEAUDIO = parseInt(process.env.USE_PULSEAUDIO || '1');
 // Low-latency playback controls (in microseconds / milliseconds) - only for ALSA mode
@@ -56,7 +55,6 @@ let audioTrackOut = null;
 let arecord = null;
 let isShuttingDown = false;
 let lastResetTime = 0;
-let idleResetTimeout = null;
 
 function resetService(reason) {
 	try {
@@ -85,30 +83,11 @@ function resetService(reason) {
 		// We remain connected to signaling and wait for the next offer
 		console.log('Service reset complete. Waiting for new offer...');
 
-		// After resetting, schedule idle reset in case no one connects
-		scheduleIdleReset();
 	} catch (error) {
 		console.error('Reset service error:', error.message);
 	}
 }
 
-function cancelIdleReset() {
-	if (idleResetTimeout) {
-		clearTimeout(idleResetTimeout);
-		idleResetTimeout = null;
-	}
-}
-
-function scheduleIdleReset() {
-	cancelIdleReset();
-	idleResetTimeout = setTimeout(() => {
-		if (isShuttingDown) return;
-		// If no active remote peer is set, consider this idle and reset
-		if (!remotePeerId) {
-			resetService('idle timeout without connections');
-		}
-	}, IDLE_RESET_MS);
-}
 
 function createPeerConnection() {
 	pc = new wrtc.RTCPeerConnection({
@@ -853,10 +832,7 @@ function connectSignaling() {
 			console.log('Signaling connected. Pi is ready (answerer).');
 			isConnected = true;
 
-			// Start idle reset countdown when signaling is ready
-			scheduleIdleReset();
-
-			if (reconnectTimeout) {
+if (reconnectTimeout) {
 				clearTimeout(reconnectTimeout);
 				reconnectTimeout = null;
 			}
@@ -877,10 +853,7 @@ function connectSignaling() {
 			);
 			isConnected = false;
 
-			// Cancel idle reset when signaling is down; it will reschedule on reconnect
-			cancelIdleReset();
-
-			if (!isShuttingDown) {
+if (!isShuttingDown) {
 				console.log(`Reconnecting in ${RECONNECT_DELAY}ms...`);
 				reconnectTimeout = setTimeout(() => {
 					if (!isShuttingDown) {
@@ -905,8 +878,6 @@ function connectSignaling() {
 							data.id === remotePeerId
 						) {
 							resetService('remote peer disconnected');
-							// No active peer anymore; schedule idle reset in case future offers don't arrive
-							scheduleIdleReset();
 						}
 						if (
 							data.event === 'peer_unavailable' &&
@@ -914,7 +885,6 @@ function connectSignaling() {
 							(data.to === remotePeerId || data.to === PEER_ID)
 						) {
 							resetService('remote peer unavailable');
-							scheduleIdleReset();
 						}
 					} catch (e) {
 						console.error('System event handling error:', e.message);
@@ -985,8 +955,6 @@ function connectSignaling() {
 					console.log('Offer received, from:', remotePeerId);
 
 					// Cancel idle reset because we have an incoming connection
-					cancelIdleReset();
-
 					if (!pc) {
 						pc = createPeerConnection();
 						setupIceCandidateHandler();
