@@ -17,6 +17,10 @@ module.exports = {
 			watch: false,
 			autorestart: true,
 			restart_delay: 1000,
+			env: {
+				PULSE_SERVER: 'unix:/run/user/1000/pulse/native',
+				XDG_RUNTIME_DIR: '/run/user/1000',
+			},
 		},
 		{
 			name: 'mediamtx',
