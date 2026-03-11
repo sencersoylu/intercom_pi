@@ -780,6 +780,7 @@ paths:
       -analyzeduration 0 -fflags nobuffer -flags low_delay -fflags +genpts
       -c:v libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency 
       -bf 0 -g 30 -keyint_min 30 -sc_threshold 0 -b:v 1500k
+      -af "highpass=f=200,lowpass=f=3000,afftdn=nf=-25"
       -c:a libopus -ac 1 -b:a 64k
       -f rtsp rtsp://127.0.0.1:8554/cam1enc
     runOnDemandRestart: yes

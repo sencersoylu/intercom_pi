@@ -22,8 +22,8 @@ const DISABLE_MIC = parseInt(process.env.DISABLE_MIC || '1');
 // PulseAudio mode (recommended) - prevents "Device busy" errors
 const USE_PULSEAUDIO = parseInt(process.env.USE_PULSEAUDIO || '1');
 // Low-latency playback controls (in microseconds / milliseconds) - only for ALSA mode
-const APLAY_BUFFER_US = parseInt(process.env.APLAY_BUFFER_US || '40000'); // 40ms (reduced for lower latency)
-const APLAY_PERIOD_US = parseInt(process.env.APLAY_PERIOD_US || '10000'); // 10ms
+const APLAY_BUFFER_US = parseInt(process.env.APLAY_BUFFER_US || '20000'); // 20ms (low-latency)
+const APLAY_PERIOD_US = parseInt(process.env.APLAY_PERIOD_US || '5000'); // 5ms
 const SINK_FRAME_MS = parseInt(process.env.SINK_FRAME_MS || '10'); // 10ms frames to minimize extra delay
 // PulseAudio device names (use 'pactl list sinks/sources' to find)
 const PULSE_SINK = process.env.PULSE_SINK || ''; // empty = default sink
@@ -195,7 +195,7 @@ function startMicrophone() {
 				'--rate=' + SAMPLE_RATE,
 				'--channels=' + CHANNELS,
 				'--format=s16le',
-				'--latency-msec=20',
+				'--latency-msec=10',
 			];
 			if (PULSE_SOURCE) micArgs.push('--device=' + PULSE_SOURCE);
 		} else {
@@ -368,7 +368,7 @@ function startSpeaker() {
 				'--rate=' + SAMPLE_RATE,
 				'--channels=' + CHANNELS,
 				'--format=s16le',
-				'--latency-msec=40',
+				'--latency-msec=10',
 			];
 			if (PULSE_SINK) args.push('--device=' + PULSE_SINK);
 		} else {
