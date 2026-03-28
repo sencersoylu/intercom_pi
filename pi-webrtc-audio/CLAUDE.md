@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #647 | 4:05 PM | 🔵 | WebRTC Audio Bridge Architecture for Raspberry Pi | ~489 |
+| #647 | 1:05 PM | 🔵 | WebRTC Audio Bridge Architecture for Raspberry Pi | ~489 |
 </claude-mem-context>
