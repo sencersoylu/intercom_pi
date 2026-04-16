@@ -54,75 +54,75 @@ let audioTrackOut = null;
 let arecord = null;
 let isShuttingDown = false;
 
-// ---- Audio mixing ----
+// ---- Audio mixing (event-driven) ----
 const frameBytes = Math.floor(SAMPLE_RATE * (SINK_FRAME_MS / 1000)) * CHANNELS * 2;
-let mixerInterval = null;
+const frameSamples = frameBytes / 2;
 let mixerPaused = false; // paused during effect playback
+let speakerBackpressure = false; // true while waiting for drain
 
-function startMixer() {
-	if (mixerInterval) return;
-	mixerInterval = setInterval(mixAndWrite, SINK_FRAME_MS);
+function speakerReady() {
+	return speakerProc && !speakerProc.killed && speakerProc.stdin &&
+		!speakerProc.stdin.destroyed && !speakerProc.stdin.writableEnded &&
+		speakerProc.stdin.writable;
 }
 
-function stopMixer() {
-	if (mixerInterval) {
-		clearInterval(mixerInterval);
-		mixerInterval = null;
-	}
-}
+// Called from every peer's ondata — tries to flush mixed frames immediately
+function tryFlushMix() {
+	if (isShuttingDown || mixerPaused || speakerBackpressure || !speakerReady()) return;
 
-function mixAndWrite() {
-	if (isShuttingDown || mixerPaused) return;
-	if (!speakerProc || speakerProc.killed || !speakerProc.stdin ||
-		speakerProc.stdin.destroyed || speakerProc.stdin.writableEnded ||
-		!speakerProc.stdin.writable) return;
+	// Keep flushing as long as at least one peer has a full frame
+	while (true) {
+		const activeSessions = [];
+		let anyHasFrame = false;
 
-	// Collect one frame from each peer that has enough data
-	const frameSamples = frameBytes / 2; // number of Int16 samples
-	const sources = [];
+		for (const session of peerSessions.values()) {
+			if (session.pcmBuffer.length >= frameBytes) {
+				activeSessions.push(session);
+				anyHasFrame = true;
+			}
+		}
 
-	for (const [peerId, session] of peerSessions) {
-		if (session.pcmBuffer.length >= frameBytes) {
-			const frame = session.pcmBuffer.subarray(0, frameBytes);
-			sources.push(frame);
+		if (!anyHasFrame) break;
+
+		// Extract one frame from each peer that has data
+		const sources = [];
+		for (const session of activeSessions) {
+			sources.push(session.pcmBuffer.subarray(0, frameBytes));
 			session.pcmBuffer = session.pcmBuffer.subarray(frameBytes);
 		}
-	}
 
-	if (sources.length === 0) return;
-
-	let out;
-	if (sources.length === 1) {
-		// Single source — no mixing needed, write directly
-		out = sources[0];
-	} else {
-		// Mix: additive with Int16 clamping
-		out = Buffer.alloc(frameBytes);
-		for (let i = 0; i < frameSamples; i++) {
-			let sum = 0;
-			for (const src of sources) {
-				sum += src.readInt16LE(i * 2);
+		let out;
+		if (sources.length === 1) {
+			out = sources[0];
+		} else {
+			// Mix: additive with Int16 clamping
+			out = Buffer.alloc(frameBytes);
+			for (let i = 0; i < frameSamples; i++) {
+				let sum = 0;
+				for (const src of sources) {
+					sum += src.readInt16LE(i * 2);
+				}
+				if (sum > 32767) sum = 32767;
+				else if (sum < -32768) sum = -32768;
+				out.writeInt16LE(sum, i * 2);
 			}
-			// Clamp to Int16 range
-			if (sum > 32767) sum = 32767;
-			else if (sum < -32768) sum = -32768;
-			out.writeInt16LE(sum, i * 2);
 		}
-	}
 
-	let ok = true;
-	try {
-		ok = speakerProc.stdin.write(out);
-	} catch (e) {
-		console.warn('Mixer write error:', e?.message || e);
-		ok = false;
-	}
-	if (!ok) {
-		// Backpressure: pause mixer until drain
-		mixerPaused = true;
-		speakerProc.stdin.once('drain', () => {
-			if (!isShuttingDown) mixerPaused = false;
-		});
+		let ok = true;
+		try {
+			ok = speakerProc.stdin.write(out);
+		} catch (e) {
+			console.warn('Mixer write error:', e?.message || e);
+			ok = false;
+		}
+		if (!ok) {
+			speakerBackpressure = true;
+			speakerProc.stdin.once('drain', () => {
+				speakerBackpressure = false;
+				if (!isShuttingDown && !mixerPaused) tryFlushMix();
+			});
+			break;
+		}
 	}
 }
 
@@ -202,7 +202,6 @@ function createPeerSession(remotePeerId) {
 		console.log(`[${remotePeerId}] Received remote audio track`);
 
 		if (!speakerProc) startSpeaker();
-		startMixer();
 
 		try {
 			const peerSink = new wrtc.nonstandard.RTCAudioSink(track);
@@ -219,13 +218,16 @@ function createPeerSession(remotePeerId) {
 					);
 					session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
 
-					// Prevent unbounded buffer growth (max ~500ms of audio)
-					const maxBufferBytes = frameBytes * 50;
+					// Prevent unbounded buffer growth (max ~100ms of audio)
+					const maxBufferBytes = frameBytes * 10;
 					if (session.pcmBuffer.length > maxBufferBytes) {
 						session.pcmBuffer = session.pcmBuffer.subarray(
 							session.pcmBuffer.length - maxBufferBytes
 						);
 					}
+
+					// Flush immediately — no polling delay
+					tryFlushMix();
 				} catch (error) {
 					console.error(`[${remotePeerId}] Audio data error:`, error.message);
 				}
@@ -285,11 +287,6 @@ function destroyPeerSession(remotePeerId, reason) {
 	session.pcmBuffer = Buffer.alloc(0);
 	peerSessions.delete(remotePeerId);
 	console.log(`[${remotePeerId}] Peer session destroyed (remaining: ${peerSessions.size})`);
-
-	// Stop mixer if no peers left
-	if (peerSessions.size === 0) {
-		stopMixer();
-	}
 }
 
 function destroyAllPeerSessions(reason) {
@@ -448,7 +445,7 @@ function startSpeaker() {
 				'--rate=' + SAMPLE_RATE,
 				'--channels=' + CHANNELS,
 				'--format=s16le',
-				'--latency-msec=10',
+				'--latency-msec=5',
 			];
 			if (PULSE_SINK) args.push('--device=' + PULSE_SINK);
 		} else {
@@ -538,8 +535,6 @@ function startSpeaker() {
 }
 
 function stopSpeaker() {
-	stopMixer();
-
 	if (speakerProc) {
 		try {
 			if (speakerProc.stdin && !speakerProc.stdin.destroyed) {
