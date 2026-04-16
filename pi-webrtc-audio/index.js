@@ -201,8 +201,13 @@ function createPeerSession(remotePeerId) {
 			const peerSink = new wrtc.nonstandard.RTCAudioSink(track);
 			session.sink = peerSink;
 
+			// Re-usable pending buffer for frame alignment (avoids Buffer.concat on the hot path)
+			let pending = Buffer.alloc(0);
+
 			peerSink.ondata = (data) => {
 				if (isShuttingDown || mixerPaused) return;
+				if (!speakerReady()) return;
+
 				try {
 					session.lastDataTime = Date.now();
 					const chunk = Buffer.from(
@@ -210,18 +215,41 @@ function createPeerSession(remotePeerId) {
 						data.samples.byteOffset,
 						data.samples.byteLength
 					);
-					session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
 
-					// Prevent unbounded buffer growth (max ~500ms of audio)
-					const maxBufferBytes = frameBytes * 50;
-					if (session.pcmBuffer.length > maxBufferBytes) {
-						session.pcmBuffer = session.pcmBuffer.subarray(
-							session.pcmBuffer.length - maxBufferBytes
-						);
+					if (peerSessions.size === 1) {
+						// Fast path: single peer — write directly to speaker, no mixer overhead
+						pending = Buffer.concat([pending, chunk]);
+						while (pending.length >= frameBytes) {
+							const out = pending.subarray(0, frameBytes);
+							let ok = true;
+							try {
+								ok = speakerProc.stdin.write(out);
+							} catch (e) {
+								ok = false;
+							}
+							pending = pending.subarray(frameBytes);
+							if (!ok) {
+								speakerBackpressure = true;
+								speakerProc.stdin.once('drain', () => {
+									speakerBackpressure = false;
+								});
+								break;
+							}
+						}
+						// Prevent pending from growing unbounded
+						if (pending.length > frameBytes * 50) {
+							pending = pending.subarray(pending.length - frameBytes * 5);
+						}
+					} else {
+						// Multi-peer path: buffer for mixer
+						session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
+						if (session.pcmBuffer.length > frameBytes * 50) {
+							session.pcmBuffer = session.pcmBuffer.subarray(
+								session.pcmBuffer.length - frameBytes * 50
+							);
+						}
+						tryFlushMix();
 					}
-
-					// Flush immediately — no polling delay
-					tryFlushMix();
 				} catch (error) {
 					console.error(`[${remotePeerId}] Audio data error:`, error.message);
 				}
