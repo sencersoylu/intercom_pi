@@ -439,7 +439,7 @@ function startSpeaker() {
 				'--rate=' + SAMPLE_RATE,
 				'--channels=' + CHANNELS,
 				'--format=s16le',
-				'--latency-msec=20',
+				'--latency-msec=10',
 			];
 			if (PULSE_SINK) args.push('--device=' + PULSE_SINK);
 		} else {
