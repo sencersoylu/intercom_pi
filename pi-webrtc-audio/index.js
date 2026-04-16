@@ -54,42 +54,47 @@ let audioTrackOut = null;
 let arecord = null;
 let isShuttingDown = false;
 
-// ---- Audio mixing (event-driven) ----
+// ---- Audio mixing ----
 const frameBytes = Math.floor(SAMPLE_RATE * (SINK_FRAME_MS / 1000)) * CHANNELS * 2;
-const frameSamples = frameBytes / 2;
+let mixerInterval = null;
 let mixerPaused = false; // paused during effect playback
-let speakerBackpressure = false; // true while waiting for drain
 
-function speakerReady() {
-	return speakerProc && !speakerProc.killed && speakerProc.stdin &&
-		!speakerProc.stdin.destroyed && !speakerProc.stdin.writableEnded &&
-		speakerProc.stdin.writable;
+function startMixer() {
+	if (mixerInterval) return;
+	mixerInterval = setInterval(mixAndWrite, SINK_FRAME_MS);
 }
 
-// Called from every peer's ondata — flushes one mixed frame per call
-function tryFlushMix() {
-	if (isShuttingDown || mixerPaused || speakerBackpressure || !speakerReady()) return;
+function stopMixer() {
+	if (mixerInterval) {
+		clearInterval(mixerInterval);
+		mixerInterval = null;
+	}
+}
 
-	const activeSessions = [];
-	for (const session of peerSessions.values()) {
+function mixAndWrite() {
+	if (isShuttingDown || mixerPaused) return;
+	if (!speakerProc || speakerProc.killed || !speakerProc.stdin ||
+		speakerProc.stdin.destroyed || speakerProc.stdin.writableEnded ||
+		!speakerProc.stdin.writable) return;
+
+	// Collect one frame from each peer that has enough data
+	const frameSamples = frameBytes / 2; // number of Int16 samples
+	const sources = [];
+
+	for (const [peerId, session] of peerSessions) {
 		if (session.pcmBuffer.length >= frameBytes) {
-			activeSessions.push(session);
+			const frame = session.pcmBuffer.subarray(0, frameBytes);
+			sources.push(frame);
+			session.pcmBuffer = session.pcmBuffer.subarray(frameBytes);
 		}
 	}
 
-	if (activeSessions.length === 0) return;
-
-	// Extract one frame from each peer that has data
-	const sources = [];
-	for (const session of activeSessions) {
-		sources.push(session.pcmBuffer.subarray(0, frameBytes));
-		session.pcmBuffer = session.pcmBuffer.subarray(frameBytes);
-	}
+	if (sources.length === 0) return;
 
 	let out;
 	if (sources.length === 1) {
-		// Single source — copy to avoid holding reference to large underlying buffer
-		out = Buffer.from(sources[0]);
+		// Single source — no mixing needed, write directly
+		out = sources[0];
 	} else {
 		// Mix: additive with Int16 clamping
 		out = Buffer.alloc(frameBytes);
@@ -98,6 +103,7 @@ function tryFlushMix() {
 			for (const src of sources) {
 				sum += src.readInt16LE(i * 2);
 			}
+			// Clamp to Int16 range
 			if (sum > 32767) sum = 32767;
 			else if (sum < -32768) sum = -32768;
 			out.writeInt16LE(sum, i * 2);
@@ -112,10 +118,10 @@ function tryFlushMix() {
 		ok = false;
 	}
 	if (!ok) {
-		speakerBackpressure = true;
+		// Backpressure: pause mixer until drain
+		mixerPaused = true;
 		speakerProc.stdin.once('drain', () => {
-			speakerBackpressure = false;
-			if (!isShuttingDown && !mixerPaused) tryFlushMix();
+			if (!isShuttingDown) mixerPaused = false;
 		});
 	}
 }
@@ -196,18 +202,14 @@ function createPeerSession(remotePeerId) {
 		console.log(`[${remotePeerId}] Received remote audio track`);
 
 		if (!speakerProc) startSpeaker();
+		startMixer();
 
 		try {
 			const peerSink = new wrtc.nonstandard.RTCAudioSink(track);
 			session.sink = peerSink;
 
-			// Re-usable pending buffer for frame alignment (avoids Buffer.concat on the hot path)
-			let pending = Buffer.alloc(0);
-
 			peerSink.ondata = (data) => {
 				if (isShuttingDown || mixerPaused) return;
-				if (!speakerReady()) return;
-
 				try {
 					session.lastDataTime = Date.now();
 					const chunk = Buffer.from(
@@ -215,40 +217,14 @@ function createPeerSession(remotePeerId) {
 						data.samples.byteOffset,
 						data.samples.byteLength
 					);
+					session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
 
-					if (peerSessions.size === 1) {
-						// Fast path: single peer — write directly to speaker, no mixer overhead
-						pending = Buffer.concat([pending, chunk]);
-						while (pending.length >= frameBytes) {
-							const out = pending.subarray(0, frameBytes);
-							let ok = true;
-							try {
-								ok = speakerProc.stdin.write(out);
-							} catch (e) {
-								ok = false;
-							}
-							pending = pending.subarray(frameBytes);
-							if (!ok) {
-								speakerBackpressure = true;
-								speakerProc.stdin.once('drain', () => {
-									speakerBackpressure = false;
-								});
-								break;
-							}
-						}
-						// Prevent pending from growing unbounded
-						if (pending.length > frameBytes * 50) {
-							pending = pending.subarray(pending.length - frameBytes * 5);
-						}
-					} else {
-						// Multi-peer path: buffer for mixer
-						session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
-						if (session.pcmBuffer.length > frameBytes * 50) {
-							session.pcmBuffer = session.pcmBuffer.subarray(
-								session.pcmBuffer.length - frameBytes * 50
-							);
-						}
-						tryFlushMix();
+					// Prevent unbounded buffer growth (max ~500ms of audio)
+					const maxBufferBytes = frameBytes * 50;
+					if (session.pcmBuffer.length > maxBufferBytes) {
+						session.pcmBuffer = session.pcmBuffer.subarray(
+							session.pcmBuffer.length - maxBufferBytes
+						);
 					}
 				} catch (error) {
 					console.error(`[${remotePeerId}] Audio data error:`, error.message);
@@ -309,6 +285,11 @@ function destroyPeerSession(remotePeerId, reason) {
 	session.pcmBuffer = Buffer.alloc(0);
 	peerSessions.delete(remotePeerId);
 	console.log(`[${remotePeerId}] Peer session destroyed (remaining: ${peerSessions.size})`);
+
+	// Stop mixer if no peers left
+	if (peerSessions.size === 0) {
+		stopMixer();
+	}
 }
 
 function destroyAllPeerSessions(reason) {
@@ -557,6 +538,8 @@ function startSpeaker() {
 }
 
 function stopSpeaker() {
+	stopMixer();
+
 	if (speakerProc) {
 		try {
 			if (speakerProc.stdin && !speakerProc.stdin.destroyed) {
