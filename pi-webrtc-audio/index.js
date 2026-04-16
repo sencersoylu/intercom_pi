@@ -66,63 +66,57 @@ function speakerReady() {
 		speakerProc.stdin.writable;
 }
 
-// Called from every peer's ondata — tries to flush mixed frames immediately
+// Called from every peer's ondata — flushes one mixed frame per call
 function tryFlushMix() {
 	if (isShuttingDown || mixerPaused || speakerBackpressure || !speakerReady()) return;
 
-	// Keep flushing as long as at least one peer has a full frame
-	while (true) {
-		const activeSessions = [];
-		let anyHasFrame = false;
+	const activeSessions = [];
+	for (const session of peerSessions.values()) {
+		if (session.pcmBuffer.length >= frameBytes) {
+			activeSessions.push(session);
+		}
+	}
 
-		for (const session of peerSessions.values()) {
-			if (session.pcmBuffer.length >= frameBytes) {
-				activeSessions.push(session);
-				anyHasFrame = true;
+	if (activeSessions.length === 0) return;
+
+	// Extract one frame from each peer that has data
+	const sources = [];
+	for (const session of activeSessions) {
+		sources.push(session.pcmBuffer.subarray(0, frameBytes));
+		session.pcmBuffer = session.pcmBuffer.subarray(frameBytes);
+	}
+
+	let out;
+	if (sources.length === 1) {
+		// Single source — copy to avoid holding reference to large underlying buffer
+		out = Buffer.from(sources[0]);
+	} else {
+		// Mix: additive with Int16 clamping
+		out = Buffer.alloc(frameBytes);
+		for (let i = 0; i < frameSamples; i++) {
+			let sum = 0;
+			for (const src of sources) {
+				sum += src.readInt16LE(i * 2);
 			}
+			if (sum > 32767) sum = 32767;
+			else if (sum < -32768) sum = -32768;
+			out.writeInt16LE(sum, i * 2);
 		}
+	}
 
-		if (!anyHasFrame) break;
-
-		// Extract one frame from each peer that has data
-		const sources = [];
-		for (const session of activeSessions) {
-			sources.push(session.pcmBuffer.subarray(0, frameBytes));
-			session.pcmBuffer = session.pcmBuffer.subarray(frameBytes);
-		}
-
-		let out;
-		if (sources.length === 1) {
-			out = sources[0];
-		} else {
-			// Mix: additive with Int16 clamping
-			out = Buffer.alloc(frameBytes);
-			for (let i = 0; i < frameSamples; i++) {
-				let sum = 0;
-				for (const src of sources) {
-					sum += src.readInt16LE(i * 2);
-				}
-				if (sum > 32767) sum = 32767;
-				else if (sum < -32768) sum = -32768;
-				out.writeInt16LE(sum, i * 2);
-			}
-		}
-
-		let ok = true;
-		try {
-			ok = speakerProc.stdin.write(out);
-		} catch (e) {
-			console.warn('Mixer write error:', e?.message || e);
-			ok = false;
-		}
-		if (!ok) {
-			speakerBackpressure = true;
-			speakerProc.stdin.once('drain', () => {
-				speakerBackpressure = false;
-				if (!isShuttingDown && !mixerPaused) tryFlushMix();
-			});
-			break;
-		}
+	let ok = true;
+	try {
+		ok = speakerProc.stdin.write(out);
+	} catch (e) {
+		console.warn('Mixer write error:', e?.message || e);
+		ok = false;
+	}
+	if (!ok) {
+		speakerBackpressure = true;
+		speakerProc.stdin.once('drain', () => {
+			speakerBackpressure = false;
+			if (!isShuttingDown && !mixerPaused) tryFlushMix();
+		});
 	}
 }
 
@@ -218,8 +212,8 @@ function createPeerSession(remotePeerId) {
 					);
 					session.pcmBuffer = Buffer.concat([session.pcmBuffer, chunk]);
 
-					// Prevent unbounded buffer growth (max ~100ms of audio)
-					const maxBufferBytes = frameBytes * 10;
+					// Prevent unbounded buffer growth (max ~500ms of audio)
+					const maxBufferBytes = frameBytes * 50;
 					if (session.pcmBuffer.length > maxBufferBytes) {
 						session.pcmBuffer = session.pcmBuffer.subarray(
 							session.pcmBuffer.length - maxBufferBytes
@@ -445,7 +439,7 @@ function startSpeaker() {
 				'--rate=' + SAMPLE_RATE,
 				'--channels=' + CHANNELS,
 				'--format=s16le',
-				'--latency-msec=5',
+				'--latency-msec=20',
 			];
 			if (PULSE_SINK) args.push('--device=' + PULSE_SINK);
 		} else {
