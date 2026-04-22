@@ -156,30 +156,21 @@ wss.on('connection', (ws, req) => {
 		return ws.close(1011, 'Server error during setup');
 	}
 
-	// Heartbeat with isAlive pattern — terminate if two consecutive pings go unanswered
-	ws.isAlive = true;
+	// Heartbeat
 	const heartbeatInterval = setInterval(() => {
-		if (ws.readyState !== 1) {
-			clearInterval(heartbeatInterval);
-			return;
-		}
-		if (ws.isAlive === false) {
-			logActivity(`Peer ${peerId} unresponsive, terminating`);
-			clearInterval(heartbeatInterval);
-			try { ws.terminate(); } catch {}
-			return;
-		}
-		ws.isAlive = false;
-		try {
-			ws.ping();
-		} catch (error) {
-			logActivity(`Ping error for ${peerId}: ${error.message}`);
+		if (ws.readyState === 1) {
+			try {
+				ws.ping();
+			} catch (error) {
+				logActivity(`Ping error for ${peerId}: ${error.message}`);
+				clearInterval(heartbeatInterval);
+			}
+		} else {
 			clearInterval(heartbeatInterval);
 		}
 	}, 30000); // 30 seconds
 
 	ws.on('pong', () => {
-		ws.isAlive = true;
 		ws.lastActivity = Date.now();
 	});
 
@@ -306,11 +297,10 @@ wss.on('error', (error) => {
 	logActivity(`WebSocket Server error: ${error.message}`);
 });
 
-// Cleanup inactive connections. Relies on isAlive ping-pong to decide liveness;
-// only force-closes peers that have been silent for a long grace window.
+// Cleanup inactive connections
 setInterval(() => {
 	const now = Date.now();
-	const timeout = 300000; // 5 minutes
+	const timeout = 60000; // 1 minute
 
 	peers.forEach((ws, id) => {
 		if (now - ws.lastActivity > timeout) {
@@ -322,7 +312,7 @@ setInterval(() => {
 			}
 		}
 	});
-}, 60000);
+}, 30000); // Check every 30 seconds
 
 // Graceful shutdown
 function gracefulShutdown() {
