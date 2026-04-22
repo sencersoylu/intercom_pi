@@ -177,13 +177,9 @@ function createPeerSession(remotePeerId) {
 			peerPc.connectionState === 'closed' ||
 			peerPc.connectionState === 'failed') {
 			setTimeout(() => {
-				if (isShuttingDown) return;
-				// Only destroy if this pc is still the active session's pc.
-				// Guards against a stale old-pc event killing a freshly-created
-				// session for the same peerId (e.g. after replacement by new offer).
-				const current = peerSessions.get(remotePeerId);
-				if (!current || current.pc !== peerPc) return;
-				destroyPeerSession(remotePeerId, `pc state: ${peerPc.connectionState}`);
+				if (!isShuttingDown) {
+					destroyPeerSession(remotePeerId, `pc state: ${peerPc.connectionState}`);
+				}
 			}, 500);
 		}
 	};
@@ -250,8 +246,6 @@ function createPeerSession(remotePeerId) {
 
 			track.onended = () => {
 				console.log(`[${remotePeerId}] Remote audio track ended`);
-				const current = peerSessions.get(remotePeerId);
-				if (!current || current.pc !== peerPc) return;
 				destroyPeerSession(remotePeerId, 'track ended');
 			};
 
@@ -853,8 +847,6 @@ function connectSignaling() {
 					const fromPeer = data.from;
 					const session = peerSessions.get(fromPeer);
 					if (!session) return;
-					if (session.pc && (session.pc.connectionState === 'closed' ||
-						session.pc.signalingState === 'closed')) return;
 
 					if (session.pc && session.pc.remoteDescription) {
 						await session.pc.addIceCandidate(new wrtc.RTCIceCandidate(data.candidate));
